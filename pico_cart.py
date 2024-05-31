@@ -80,11 +80,11 @@ def read_code_from_rom(r, keep_compression=False, **opts):
 
 def read_cart_from_rom(buffer, path=None, allow_tiny=False, **opts):
     cart = Cart(path=path)
-    
+
     with BinaryReader(BytesIO(buffer), big_end = True) as r:
         if r.len() < k_cart_size and allow_tiny: # tiny rom, code only
             cart.code, cart.code_rom = read_code_from_rom(r, **opts)
-        
+
         else:
             cart.rom.replace(r.bytes(k_rom_size))
             cart.code, cart.code_rom = read_code_from_rom(r, **opts)
@@ -132,7 +132,7 @@ def write_cart_to_tiny_rom(cart, force_compress=False, keep_compression=False, *
         if keep_compression and cart.code_rom != None:
             with BinaryReader(BytesIO(cart.code_rom), big_end = True) as code_r:
                 compressed_size = get_compressed_size(code_r)
-            
+
             w.bytes(cart.code_rom.get_block(0, compressed_size))
         else:
             compress_code(w, cart.code, force_compress=True, **opts)
@@ -168,7 +168,10 @@ def surface_pixels_to_screenshot(pixels, offset=Point.zero):
 
     for y in range(k_screenshot_rect.h):
         for x in range(k_screenshot_rect.w):
-            r, g, b, a = pixels[Point(x, y) + offset]
+            try:
+                r, g, b, a = pixels[Point(x, y) + offset]
+            except ValueError:
+                r, g, b = pixels[Point(x, y) + offset]
             screenshot[x, y] = k_palette_rgb_6bpp_map.get((r & ~3, g & ~3, b & ~3), 0)
 
     return screenshot
@@ -238,10 +241,10 @@ def write_cart_to_image(cart, template_image=None, template_only=False, **opts):
         if not template_only:
             if cart.label:
                 label_surf = create_screenshot_surface(cart.label, transparent=True)
-                image.draw(label_surf, k_label_offset, k_screenshot_rect)        
+                image.draw(label_surf, k_label_offset, k_screenshot_rect)
             if cart.title:
                 draw_text_on_image(image, cart.title, k_title_offset, k_title_size, k_title_spacing)
-        
+
         pixels = image.pixels
 
         for y in range(height):
@@ -278,7 +281,7 @@ def write_cart_label(cart, **_):
     return create_screenshot_surface(label, transparent=True).save()
 
 def write_cart_spritesheet(cart, **_):
-    spritesheet = MultidimArray(k_screenshot_rect.size, 0)    
+    spritesheet = MultidimArray(k_screenshot_rect.size, 0)
     for y in range(128):
         for x in range(128):
             spritesheet[x, y] = cart.rom.get4(mem_sprite_addr(x, y))
@@ -290,29 +293,29 @@ k_meta_prefix = "meta:"
 
 def read_cart_from_source(data, path=None, raw=False, preprocessor=None, **_):
     cart = Cart(path=path)
-    
+
     def nybbles(line):
         for b in line:
             yield int(b, 16)
-    
+
     def nybble_groups(line, n):
         for i in range(0, len(line), n):
             yield nybbles(line[i:i+n].ljust(n, "0"))
-    
+
     def bytes(line):
         for i in range(0, len(line), 2):
             yield int(line[i:i+2].ljust(2, "0"), 16)
-    
+
     def ext_nybbles(line):
         for b in line:
             if 'v' >= b.lower() >= 'g':
                 yield ord(b.lower()) - ord('g') + 16
             else:
                 yield int(b, 16)
-      
+
     if not raw and not data.startswith(k_p8_prefix) and not data.startswith("__lua__"): # fallback to raw
         raw = True
-    
+
     header = "lua" if raw else None
     code = []
     code_line = 0
@@ -320,11 +323,11 @@ def read_cart_from_source(data, path=None, raw=False, preprocessor=None, **_):
     for line_i, line in enumerate(data.splitlines()): # splitlines eats a trailing empty line, like pico8 does
         try:
             clean = line.strip()
-            
+
             if line.startswith("__") and clean.endswith("__") and not raw: # may end with whitespace
                 header = clean[2:-2]
                 y = 0
-                
+
             elif header == "lua":
                 if y == 0:
                     code_line = line_i
@@ -332,7 +335,7 @@ def read_cart_from_source(data, path=None, raw=False, preprocessor=None, **_):
                     code.append("\n")
                 code.append(to_p8str(line))
                 y += 1
-                
+
             elif header == "gfx" and clean and y < 0x80:
                 x = 0
                 for b in nybbles(clean):
@@ -340,7 +343,7 @@ def read_cart_from_source(data, path=None, raw=False, preprocessor=None, **_):
                         cart.rom.set4(mem_sprite_addr(x, y), b)
                         x += 1
                 y += 1
-                    
+
             elif header == "map" and clean and y < 0x40: # usually 0x20
                 x = 0
                 for b in bytes(clean):
@@ -348,7 +351,7 @@ def read_cart_from_source(data, path=None, raw=False, preprocessor=None, **_):
                         cart.rom.set8(mem_map_addr(x, y), b)
                         x += 1
                 y += 1
-                    
+
             elif header == "gff" and clean and y < 2:
                 x = 0
                 for b in bytes(clean):
@@ -356,7 +359,7 @@ def read_cart_from_source(data, path=None, raw=False, preprocessor=None, **_):
                         cart.rom.set8(mem_flag_addr(x, y), b)
                         x += 1
                 y += 1
-                
+
             elif header == "sfx" and clean and y < 0x40:
                 x = 0
                 for b in bytes(clean[:8]):
@@ -365,17 +368,17 @@ def read_cart_from_source(data, path=None, raw=False, preprocessor=None, **_):
                 x = 0
                 for bph, bpl, bw, bv, be in nybble_groups(clean[8:], 5):
                     if x < 0x20:
-                        value = bpl | ((bph & 0x3) << 4) | ((bw & 0x7) << 6) | ((bv & 0x7) << 9) | ((be & 0x7) << 12) | ((bw & 0x8) << 12) 
+                        value = bpl | ((bph & 0x3) << 4) | ((bw & 0x7) << 6) | ((bv & 0x7) << 9) | ((be & 0x7) << 12) | ((bw & 0x8) << 12)
                         cart.rom.set16(mem_sfx_addr(y, x), value)
                         x += 1
                 y += 1
-                
+
             elif header == "music" and clean and y < 0x40:
                 x = 0
                 flags = next(bytes(clean[:2]))
                 for b in bytes(clean[3:]):
                     if x < 4:
-                        value = b | (((flags >> x) & 1) << 7) 
+                        value = b | (((flags >> x) & 1) << 7)
                         cart.rom.set8(mem_music_addr(y, x), value)
                         x += 1
                 y += 1
@@ -392,13 +395,13 @@ def read_cart_from_source(data, path=None, raw=False, preprocessor=None, **_):
 
             elif header and header.startswith(k_meta_prefix):
                 cart.meta[header[len(k_meta_prefix):]].append(line.rstrip('\n'))
-                
+
             elif header == None and clean.startswith("version "):
                 cart.set_version(int(clean.split()[1]))
 
         except Exception as e:
             throw(f"Invalid {header} line in p8 file (line #{line_i + 1})")
-            
+
     cart.code, cart.code_map = preprocess_code(path, "".join(code), code_line, preprocessor=preprocessor)
     return cart
 
@@ -412,10 +415,10 @@ def write_cart_to_source(cart, unicode_caps=False, sections=None, **_):
 
     def nybbles(data):
         return "".join('%01x' % b for b in data)
-    
+
     def nybble_groups(data):
         return "".join([nybbles(group) for group in data])
-    
+
     def bytes(data):
         return "".join('%02x' % b for b in data)
 
@@ -475,12 +478,12 @@ def write_cart_to_source(cart, unicode_caps=False, sections=None, **_):
                 flags = bytes((sum(((ch >> 7) & 1) << i for i, ch in enumerate(chans)),))
                 ids = bytes(ch & 0x7f for ch in chans)
                 lines.append(flags + " " + ids)
-    
+
     if include("label") and cart.label and any(cart.label.array):
         lines.append("__label__")
         for y in range(128):
             lines.append(ext_nybbles(cart.label[x, y] for x in range(128)))
-    
+
     for meta, metalines in cart.meta.items():
         if include(k_meta_prefix + meta):
             lines.append(f"__{k_meta_prefix + meta}__")
@@ -514,12 +517,12 @@ def read_cart_from_url(url, size_handler=None, **opts):
         throw("Invalid url - no '?'")
 
     code, gfx = None, None
-    
+
     url_params = url.split("?", 1)[1]
     for url_param in url_params.split("&"):
         if "=" not in url_param:
             throw(f"Invalid url param: {url_param}")
-        
+
         key, value = url_param.split("=", 1)
         if key == "c":
             code = value
@@ -557,7 +560,7 @@ def read_cart_from_url(url, size_handler=None, **opts):
 k_url_prefix = "https://www.pico-8-edu.com"
 
 def write_cart_to_url(cart, url_prefix=k_url_prefix, force_compress=False, size_handler=None, **opts):
-    raw_code = write_cart_to_tiny_rom(cart, **opts)        
+    raw_code = write_cart_to_tiny_rom(cart, **opts)
     code = base64.b64encode(raw_code, k_base64_alt_chars)
 
     rect = iter_rect(128, 128)
@@ -592,10 +595,10 @@ def write_cart_to_url(cart, url_prefix=k_url_prefix, force_compress=False, size_
     url += "/?c=" + code.decode()
     if gfx:
         url += "&g=" + "".join(gfx)
-    
+
     if size_handler:
         print_url_size(len(url), handler=size_handler)
-        
+
     check(len(url) - k_url_prefix_size <= k_url_size, "url has too many characters!")
     return url
 
@@ -604,7 +607,7 @@ k_clip_suffix = "[/cart]"
 
 def read_raw_from_clip(clip):
     if clip.startswith(k_clip_prefix) and clip.endswith(k_clip_suffix):
-        return bytes.fromhex(clip[len(k_clip_prefix):-len(k_clip_suffix)])        
+        return bytes.fromhex(clip[len(k_clip_prefix):-len(k_clip_suffix)])
     else:
         throw("Invalid clipboard tag")
 
@@ -625,7 +628,7 @@ def read_cart_autodetect(path, **opts):
         # cart?
         if text.startswith(k_p8_prefix) or text.startswith("__lua__"):
             return read_cart_from_source(text, path=path, **opts)
-            
+
         rtext = text.rstrip()
 
         # clip?
@@ -638,7 +641,7 @@ def read_cart_autodetect(path, **opts):
 
         # plain text?
         return read_cart_from_source(text, raw=True, path=path, **opts)
-        
+
     except UnicodeDecodeError: # required to happen for pngs
         return read_cart(path, CartFormat.png, **opts)
 
